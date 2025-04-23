@@ -15,10 +15,12 @@ def home():
 
 @app.route('/download', methods=['POST'])
 def download():
+    # 1. Read JSON body
     url = request.json.get('url')
     if not url:
         return jsonify({"error": "No URL provided"}), 400
 
+    # 2. Configure yt-dlp to download into DOWNLOAD_DIR
     ydl_opts = {
         'format': 'best',
         'outtmpl': os.path.join(DOWNLOAD_DIR, '%(title)s.%(ext)s'),
@@ -30,11 +32,18 @@ def download():
     except Exception as e:
         return jsonify({"error": f"Download Error: {e}"}), 500
 
+    # 3. Find the downloaded file path
     file_path = ydl.prepare_filename(info)
     if not os.path.exists(file_path):
         return jsonify({"error": "Downloaded file not found"}), 500
 
-    return jsonify({"message": "Download successful", "file_path": file_path}), 200
+    # 4. Stream file back to the caller as an attachment
+    return send_file(
+        file_path,
+        as_attachment=True,
+        download_name=os.path.basename(file_path),
+        mimetype='application/octet-stream'
+    )
 
 @app.route('/progress', methods=['GET'])
 def progress():
@@ -45,4 +54,6 @@ def progress():
     return Response(stream_with_context(gen()), mimetype='text/event-stream')
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    # Use the PORT env var that Railway provides, default to 5000 locally
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=True)

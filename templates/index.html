@@ -31,31 +31,50 @@
     document.getElementById('start').onclick = () => {
       const url = document.getElementById('url').value;
       document.getElementById('response').textContent = 'Starting download...';
-      // 1. POST to /download
+      document.getElementById('progress').textContent = '';
+
       fetch('/download', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url })
       })
-      .then(res => res.json())
-      .then(json => {
-        if(json.error) {
-          document.getElementById('response').textContent = 'Error: ' + json.error;
-        } else {
-          document.getElementById('response').textContent = 'Download queued: ' + json.file_path;
-          // 2. Open SSE to /progress
-          const evt = new EventSource('/progress');
-          evt.onmessage = e => {
-            const data = JSON.parse(e.data);
-            document.getElementById('progress').textContent = 'Progress: ' + data.percent + '%';
-            if(data.percent >= 100) {
-              evt.close();
-            }
-          };
+      .then(res => {
+        if (!res.ok) {
+          // If error status, parse JSON for error message
+          return res.json().then(err => { throw new Error(err.error || 'Download failed') });
         }
+        // Otherwise treat as binary response
+        const disposition = res.headers.get('Content-Disposition');
+        let filename = 'video.mp4';
+        if (disposition && disposition.includes('filename=')) {
+          filename = disposition.split('filename=')[1].replace(/"/g, '');
+        }
+        return res.blob().then(blob => ({ blob, filename }));
+      })
+      .then(({ blob, filename }) => {
+        // Create a temporary link to download the blob
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(downloadUrl);
+
+        document.getElementById('response').textContent = 'Download complete.';
       })
       .catch(err => {
-        document.getElementById('response').textContent = 'Fetch error: ' + err;
+        document.getElementById('response').textContent = 'Error: ' + err.message;
+      })
+      .finally(() => {
+        // Start listening for progress updates
+        const evt = new EventSource('/progress');
+        evt.onmessage = e => {
+          const data = JSON.parse(e.data);
+          document.getElementById('progress').textContent = 'Progress: ' + data.percent + '%';
+          if (data.percent >= 100) evt.close();
+        };
       });
     };
   </script>
